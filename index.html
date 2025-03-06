@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Cloze Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        pre { background: #f4f4f4; padding: 10px; }
+        .blank { display: inline-block; width: 100px; margin: 5px; }
+        #timer { font-weight: bold; color: red; }
+    </style>
+</head>
+<body>
+    <h1>Python Cloze Test</h1>
+    <input type="file" id="fileInput" multiple accept=".py">
+    <button onclick="processFiles()">Generate Test</button>
+    <div id="timer">Time Remaining: 10:00</div>
+    <pre id="codeDisplay"></pre>
+    <button onclick="submitAnswers()" style="display: none;" id="submitBtn">Submit</button>
+    <div id="score"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
