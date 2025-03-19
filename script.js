@@ -1,4 +1,4 @@
-let blankAnswers = []; // Replace originalSymbols with explicit blank tracking
+let blankAnswers = [];
 let timer;
 let timeLeft = 600; // 10 minutes in seconds
 
@@ -53,12 +53,51 @@ function generateClozeTest(fileContents, numBlanks) {
 
         console.log("Combined code:\n", combinedCode);
 
-        // Tokenize and avoid repetition
-        const tokens = combinedCode.match(/\b\w+\b|[+\-*/=<>!(){}[\]]/g) || [];
-        const validTokens = tokens.filter(t => t.length > 1 || /[+\-*/=<>!]/.test(t));
-        const uniqueTokens = [...new Set(validTokens)];
+        // Tokenize, excluding print contents and strings
+        const tokens = combinedCode.match(/\b\w+\b|[+\-*/=<>!(){}[\]]|['"]|[^\s'"]+/g) || [];
+        const validTokens = [];
+        let inPrint = false;
+        let inString = false;
+        let stringDelim = '';
+        let parenDepth = 0;
 
-        console.log("Unique tokens:", uniqueTokens);
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+
+            // Handle string delimiters
+            if (!inPrint && (token === '"' || token === "'") && !inString) {
+                inString = true;
+                stringDelim = token;
+                continue;
+            } else if (inString && token === stringDelim) {
+                inString = false;
+                continue;
+            } else if (inString) {
+                continue; // Skip tokens inside strings
+            }
+
+            // Handle print statements
+            if (token === "print" && i + 1 < tokens.length && tokens[i + 1] === "(") {
+                inPrint = true;
+                parenDepth = 1;
+                i++; // Skip "("
+                continue;
+            }
+            if (inPrint) {
+                if (token === "(") parenDepth++;
+                else if (token === ")") parenDepth--;
+                if (parenDepth === 0) inPrint = false;
+                continue;
+            }
+
+            // Add valid tokens (variables, functions, operators)
+            if ((token.length > 1 || /[+\-*/=<>!]/.test(token)) && !/['"]/.test(token)) {
+                validTokens.push(token);
+            }
+        }
+
+        const uniqueTokens = [...new Set(validTokens)];
+        console.log("Unique tokens (excluding print contents and strings):", uniqueTokens);
 
         // Select unique symbols to blank
         let selectedSymbols = [];
@@ -85,10 +124,10 @@ function generateClozeTest(fileContents, numBlanks) {
         let fileOffsets = [0];
         fileContents.forEach((_, i) => fileOffsets.push(fileOffsets[i] + `File: ${fileContents[i].name}\n${fileContents[i].content.replace(/#.*$/gm, "").replace(/'''[\s\S]*?'''|"""[\s\S]*?"""/g, "")}\n\n`.length));
 
-        // Replace exactly numBlanks
+        // Replace exactly numBlanks, avoiding print contents and strings
         let clozeCode = combinedCode;
         let blankCount = 0;
-        blankAnswers = []; // Reset answers array
+        blankAnswers = [];
 
         // First pass: Try to distribute per file
         for (let i = 0; i < numFiles && blankCount < numBlanks; i++) {
@@ -99,13 +138,13 @@ function generateClozeTest(fileContents, numBlanks) {
             while (fileBlanksRemaining > 0 && blankCount < numBlanks && symbolIndex < selectedSymbols.length) {
                 const symbol = selectedSymbols[symbolIndex];
                 const regex = new RegExp(`\\b${symbol}\\b`);
-                if (fileCode.match(regex)) {
+                if (fileCode.match(regex) && !isInsidePrintOrString(fileCode, symbol)) {
                     console.log(`Replacing '${symbol}' in file ${i}`);
                     fileCode = fileCode.replace(regex, `<input class="blank" id="blank${blankCount}" data-answer="${symbol}">`);
-                    blankAnswers.push(symbol); // Track each blank’s answer
+                    blankAnswers.push(symbol);
                     blankCount++;
                     fileBlanksRemaining--;
-                    selectedSymbols.splice(symbolIndex, 1); // Remove used symbol
+                    selectedSymbols.splice(symbolIndex, 1);
                 } else {
                     symbolIndex++;
                 }
@@ -117,21 +156,21 @@ function generateClozeTest(fileContents, numBlanks) {
         while (blankCount < numBlanks && selectedSymbols.length > 0) {
             const symbol = selectedSymbols[0];
             const regex = new RegExp(`\\b${symbol}\\b`);
-            if (clozeCode.match(regex)) {
+            if (clozeCode.match(regex) && !isInsidePrintOrString(clozeCode, symbol)) {
                 console.log(`Second pass: Replacing '${symbol}'`);
                 clozeCode = clozeCode.replace(regex, `<input class="blank" id="blank${blankCount}" data-answer="${symbol}">`);
                 blankAnswers.push(symbol);
                 blankCount++;
-                selectedSymbols.shift(); // Remove used symbol
+                selectedSymbols.shift();
             } else {
-                selectedSymbols.shift(); // Skip if no match
+                selectedSymbols.shift();
             }
         }
 
         console.log("Total blanks created:", blankCount);
         console.log("Blank answers:", blankAnswers);
         if (blankCount < numBlanks) {
-            console.warn(`Only ${blankCount} blanks created, expected ${numBlanks}. Check token availability.`);
+            console.warn(`Only ${blankCount} blanks created, expected ${numBlanks}. Check token availability outside print/strings.`);
         }
         document.getElementById('codeDisplay').innerHTML = clozeCode;
         document.getElementById('submitBtn').style.display = "block";
@@ -139,6 +178,24 @@ function generateClozeTest(fileContents, numBlanks) {
     } catch (error) {
         console.error("Error in generateClozeTest:", error);
     }
+}
+
+// Helper function to check if a token is inside a print statement or string
+function isInsidePrintOrString(code, symbol) {
+    // Check print statements
+    const printRegex = /print\s*\(([^)]+)\)/g;
+    let match;
+    while ((match = printRegex.exec(code)) !== null) {
+        if (match[1].includes(symbol)) return true;
+    }
+
+    // Check strings
+    const stringRegex = /(['"])(.*?)\1/g;
+    while ((match = stringRegex.exec(code)) !== null) {
+        if (match[2].includes(symbol)) return true;
+    }
+
+    return false;
 }
 
 // Timer logic
@@ -165,7 +222,7 @@ function updateTimerDisplay() {
 // Submit and score answers with feedback
 function submitAnswers() {
     clearInterval(timer);
-    const numBlanks = blankAnswers.length; // Use actual blanks created
+    const numBlanks = blankAnswers.length;
     let score = 0;
 
     console.log(`Scoring ${numBlanks} blanks...`);
