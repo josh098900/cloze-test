@@ -2,6 +2,9 @@ let blankAnswers = [];
 let timer;
 let timeLeft = 600;
 
+// Tkinter keywords
+const tkinterKeywords = ["Tk", "Button", "Label", "pack", "grid", "place"];
+
 // Process uploaded files
 function processFiles() {
     const files = document.getElementById('fileInput').files;
@@ -49,50 +52,74 @@ function generateClozeTest(fileContents, numBlanks) {
     });
     console.log("Combined code (no comments):\n", combinedCode);
 
-    // Tokenize, excluding print contents and strings
-    const tokens = combinedCode.match(/\b\w+\b|[+\-*/=<>!(){}[\]]/g) || [];
-    const validTokens = [];
-    let inPrint = false;
+    // Tokenize manually
+    const tokens = [];
+    let currentToken = '';
     let inString = false;
     let stringDelim = '';
+    let inPrint = false;
     let parenDepth = 0;
+    let inImport = false;
 
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
+    for (let i = 0; i < combinedCode.length; i++) {
+        const char = combinedCode[i];
 
-        // Handle strings
-        if (!inPrint && (token === '"' || token === "'") && !inString) {
+        if (!inPrint && !inImport && (char === '"' || char === "'") && !inString) {
             inString = true;
-            stringDelim = token;
+            stringDelim = char;
+            if (currentToken) tokens.push(currentToken);
+            currentToken = '';
             continue;
         }
-        if (inString && token === stringDelim) {
+        if (inString && char === stringDelim) {
             inString = false;
             continue;
         }
         if (inString) continue;
 
-        // Handle print statements
-        if (token === "print" && i + 1 < tokens.length && tokens[i + 1] === "(") {
+        if (/\s/.test(char) || /[+\-*/=<>!(){}[\]]/.test(char)) {
+            if (currentToken) {
+                if (!inPrint && !inImport) tokens.push(currentToken);
+                currentToken = '';
+            }
+            if (/[+\-*/=<>!(){}[\]]/.test(char) && !inPrint && !inImport) {
+                tokens.push(char);
+            }
+            if (char === '\n') inImport = false;
+            continue;
+        }
+
+        currentToken += char;
+
+        if (currentToken === 'print' && i + 1 < combinedCode.length && combinedCode[i + 1] === '(') {
             inPrint = true;
             parenDepth = 1;
-            i++; // Skip "("
+            tokens.pop();
+            currentToken = '';
+            i++;
             continue;
         }
         if (inPrint) {
-            if (token === "(") parenDepth++;
-            else if (token === ")") parenDepth--;
+            if (char === '(') parenDepth++;
+            else if (char === ')') parenDepth--;
             if (parenDepth === 0) inPrint = false;
             continue;
         }
 
-        if (token.length > 1 || /[+\-*/=<>!]/.test(token)) {
-            validTokens.push(token);
+        if (currentToken === 'import' || (currentToken === 'from' && i + 4 < combinedCode.length && combinedCode.slice(i + 1, i + 5) === ' imp')) {
+            inImport = true;
+            tokens.pop();
+            currentToken = '';
+            continue;
         }
     }
+    if (currentToken && !inPrint && !inImport) tokens.push(currentToken);
+
+    const validTokens = tokens.filter(t => t.length > 1 || /[+\-*/=<>!]/.test(t));
+    console.log("Valid tokens (no print/strings/imports):", validTokens);
 
     const uniqueTokens = [...new Set(validTokens)];
-    console.log("Valid tokens (no print/strings):", uniqueTokens);
+    console.log("Unique tokens:", uniqueTokens);
 
     // Select symbols
     let selectedSymbols = [];
@@ -106,24 +133,32 @@ function generateClozeTest(fileContents, numBlanks) {
     }
     console.log(`Selected ${selectedSymbols.length} symbols:`, selectedSymbols);
 
-    // Replace blanks
+    // Replace one occurrence per line
     let clozeCode = combinedCode;
     let blankCount = 0;
     blankAnswers = [];
     let usedSymbols = new Set();
+    const lines = clozeCode.split('\n');
 
     for (let symbol of selectedSymbols) {
-        const regex = new RegExp(`\\b${symbol}\\b`);
-        if (clozeCode.match(regex) && !usedSymbols.has(symbol)) {
-            console.log(`Replacing '${symbol}'`);
-            clozeCode = clozeCode.replace(regex, `<input class="blank" id="blank${blankCount}" data-answer="${symbol}">`);
-            blankAnswers.push(symbol);
-            usedSymbols.add(symbol);
-            blankCount++;
-            if (blankCount === numBlanks) break;
+        if (blankCount >= numBlanks) break;
+        if (usedSymbols.has(symbol)) continue;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const regex = new RegExp(`\\b${symbol}\\b`);
+            if (line.match(regex)) {
+                console.log(`Replacing '${symbol}' in line ${i}: ${line}`);
+                lines[i] = line.replace(regex, `<input class="blank" id="blank${blankCount}" data-answer="${symbol}">`);
+                blankAnswers.push(symbol);
+                usedSymbols.add(symbol);
+                blankCount++;
+                break; // Only one per line
+            }
         }
     }
 
+    clozeCode = lines.join('\n');
     console.log("Total blanks created:", blankCount);
     console.log("Blank answers:", blankAnswers);
     document.getElementById('codeDisplay').innerHTML = clozeCode;
